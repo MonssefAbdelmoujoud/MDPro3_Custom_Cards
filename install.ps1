@@ -1,5 +1,5 @@
 param (
-    [string]$MDProPath = "$env:USERPROFILE\Desktop\MDPro3"
+    [string]$MDProPath = $PSScriptRoot
 )
 
 $ProgressPreference = 'SilentlyContinue'
@@ -22,9 +22,6 @@ Write-Host ""
 if (!(Test-Path $MDProPath)) {
     Write-Host "ERROR: The MDPro3 folder does not exist:"
     Write-Host $MDProPath
-    Write-Host ""
-    Write-Host "Make sure your MDPro3 folder is on your Desktop and named exactly:"
-    Write-Host "MDPro3"
     exit 1
 }
 
