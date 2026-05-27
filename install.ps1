@@ -1,7 +1,8 @@
 param (
-    [Parameter(Mandatory=$true)]
-    [string]$MDProPath
+    [string]$MDProPath = "$env:USERPROFILE\Desktop\MDPro3"
 )
+
+$ProgressPreference = 'SilentlyContinue'
 
 $RepoZipUrl = "https://github.com/MonssefAbdelmoujoud/MDPro3_Custom_Cards/archive/refs/heads/main.zip"
 
@@ -14,15 +15,30 @@ Write-Host " MDPro3 Custom Cards Installer"
 Write-Host "====================================="
 Write-Host ""
 
+Write-Host "Using MDPro3 folder:"
+Write-Host $MDProPath
+Write-Host ""
+
 if (!(Test-Path $MDProPath)) {
     Write-Host "ERROR: The MDPro3 folder does not exist:"
     Write-Host $MDProPath
+    Write-Host ""
+    Write-Host "Make sure your MDPro3 folder is on your Desktop and named exactly:"
+    Write-Host "MDPro3"
     exit 1
 }
 
 if (!(Test-Path (Join-Path $MDProPath "Expansions"))) {
     Write-Host "ERROR: This does not look like a valid MDPro3 folder."
-    Write-Host "Missing folder: Expansions"
+    Write-Host "Missing folder:"
+    Write-Host (Join-Path $MDProPath "Expansions")
+    exit 1
+}
+
+if (!(Test-Path (Join-Path $MDProPath "Picture"))) {
+    Write-Host "ERROR: This does not look like a valid MDPro3 folder."
+    Write-Host "Missing folder:"
+    Write-Host (Join-Path $MDProPath "Picture")
     exit 1
 }
 
@@ -34,47 +50,51 @@ New-Item -ItemType Directory -Path $TempDir | Out-Null
 New-Item -ItemType Directory -Path $ExtractPath | Out-Null
 
 Write-Host "Downloading latest custom cards from GitHub..."
-Invoke-WebRequest -Uri $RepoZipUrl -OutFile $ZipPath
 
-Write-Host "Extracting..."
-Expand-Archive -Path $ZipPath -DestinationPath $ExtractPath
+try {
+    Invoke-WebRequest -Uri $RepoZipUrl -OutFile $ZipPath -UseBasicParsing
+}
+catch {
+    Write-Host ""
+    Write-Host "ERROR: Failed to download files from GitHub."
+    Write-Host $_.Exception.Message
+    exit 1
+}
+
+Write-Host "Download complete."
+Write-Host "Extracting files..."
+
+try {
+    Expand-Archive -Path $ZipPath -DestinationPath $ExtractPath -Force
+}
+catch {
+    Write-Host ""
+    Write-Host "ERROR: Failed to extract downloaded zip file."
+    Write-Host $_.Exception.Message
+    exit 1
+}
 
 $RepoFolder = Get-ChildItem $ExtractPath | Select-Object -First 1
 $SourceRoot = Join-Path $RepoFolder.FullName "MDPro3Files"
 
 if (!(Test-Path $SourceRoot)) {
+    Write-Host ""
     Write-Host "ERROR: MDPro3Files folder was not found in the downloaded repo."
+    Write-Host "Expected location:"
+    Write-Host $SourceRoot
     exit 1
 }
 
-$BackupRoot = Join-Path $MDProPath ("Backup_CustomCards_" + (Get-Date -Format "yyyyMMdd_HHmmss"))
-New-Item -ItemType Directory -Path $BackupRoot | Out-Null
-
-Write-Host "Backup folder created:"
-Write-Host $BackupRoot
-Write-Host ""
-
 $FilesToInstall = Get-ChildItem $SourceRoot -Recurse -File
 
-Write-Host "Backing up files that will be replaced..."
-
-foreach ($File in $FilesToInstall) {
-    $RelativePath = $File.FullName.Substring($SourceRoot.Length).TrimStart('\', '/')
-    $TargetFile = Join-Path $MDProPath $RelativePath
-
-    if (Test-Path $TargetFile) {
-        $BackupFile = Join-Path $BackupRoot $RelativePath
-        $BackupFolder = Split-Path $BackupFile -Parent
-
-        if (!(Test-Path $BackupFolder)) {
-            New-Item -ItemType Directory -Path $BackupFolder -Force | Out-Null
-        }
-
-        Copy-Item $TargetFile $BackupFile -Force
-    }
+if ($FilesToInstall.Count -eq 0) {
+    Write-Host ""
+    Write-Host "ERROR: No files found inside MDPro3Files."
+    exit 1
 }
 
-Write-Host "Installing files..."
+Write-Host "Installing custom card files..."
+Write-Host ""
 
 foreach ($File in $FilesToInstall) {
     $RelativePath = $File.FullName.Substring($SourceRoot.Length).TrimStart('\', '/')
@@ -90,11 +110,15 @@ foreach ($File in $FilesToInstall) {
 }
 
 Write-Host ""
+Write-Host "Cleaning temporary files..."
+
+if (Test-Path $TempDir) {
+    Remove-Item $TempDir -Recurse -Force
+}
+
+Write-Host ""
 Write-Host "====================================="
 Write-Host " Installation complete!"
 Write-Host "====================================="
-Write-Host ""
-Write-Host "Backup saved here:"
-Write-Host $BackupRoot
 Write-Host ""
 Write-Host "You can now start MDPro3."
