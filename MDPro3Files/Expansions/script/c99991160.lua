@@ -1,4 +1,4 @@
--- Zharr Sacrifice to the Bull-Father
+-- Zharr Sacrifice at the Ziggurat
 -- Script for MDPro3
 local s,id=GetID()
 local SET_ZHARR=0xf81
