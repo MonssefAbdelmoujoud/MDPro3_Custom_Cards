@@ -1,4 +1,4 @@
--- Zharr Tithe of Slaves
+-- Zharr Sacrifice to the Bull-Father
 -- Script for MDPro3
 local s,id=GetID()
 local SET_ZHARR=0xf81
