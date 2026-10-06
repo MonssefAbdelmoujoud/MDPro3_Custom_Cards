@@ -1,4 +1,4 @@
--- Zharr Curse of Stone
+-- Zharr Blood of Hashut
 -- Script for MDPro3
 local s,id=GetID()
 local SET_ZHARR=0xf81
