@@ -106,6 +106,64 @@ foreach ($File in $FilesToInstall) {
     Write-Host "Installed: $RelativePath"
 }
 
+# Finishers and special frames are card ID lists in MDPro3's own Data\SpecialCards.json
+# (Data\Settings.json holds a second copy of the finisher lists).
+# MDPro3 updates rewrite those files, so our card IDs are added to them instead of replacing them.
+$SpecialAdditions = Join-Path $RepoFolder.FullName "SpecialCards_Custom.json"
+
+if (Test-Path $SpecialAdditions) {
+    Write-Host ""
+    Write-Host "Adding custom cards to MDPro3's special card lists..."
+
+    foreach ($DataFile in @("Data\SpecialCards.json", "Data\Settings.json")) {
+        $SpecialFile = Join-Path $MDProPath $DataFile
+        if (!(Test-Path $SpecialFile)) { continue }
+
+        try {
+            $Original = [IO.File]::ReadAllText($SpecialFile)
+            $Text = $Original
+            $NL = if ($Original.Contains("`r`n")) { "`r`n" } else { "`n" }
+            $Additions = [IO.File]::ReadAllText($SpecialAdditions) | ConvertFrom-Json -ErrorAction Stop
+            $AddedCount = 0
+
+            foreach ($Prop in $Additions.PSObject.Properties) {
+                $Key = $Prop.Name
+                $Ids = @($Prop.Value | ForEach-Object { [int]$_ })
+                $Match = [regex]::Match($Text, '"' + [regex]::Escape($Key) + '"\s*:\s*\[([^\]]*)\]')
+
+                if ($Match.Success) {
+                    $Existing = @([regex]::Matches($Match.Groups[1].Value, '\d+') | ForEach-Object { [int]$_.Value })
+                    $Missing = @($Ids | Where-Object { $Existing -notcontains $_ })
+                    if ($Missing.Count -eq 0) { continue }
+                    $List = $Existing + $Missing
+                    $New = '"' + $Key + '": [' + $NL + '    ' + ($List -join (',' + $NL + '    ')) + $NL + '  ]'
+                    $Text = $Text.Substring(0, $Match.Index) + $New + $Text.Substring($Match.Index + $Match.Length)
+                    $AddedCount += $Missing.Count
+                }
+                elseif ($DataFile -eq "Data\SpecialCards.json") {
+                    # Only SpecialCards.json gets lists it does not have yet; Settings.json is only extended
+                    $New = '{' + $NL + '  "' + $Key + '": [' + $NL + '    ' + ($Ids -join (',' + $NL + '    ')) + $NL + '  ],'
+                    $Text = ([regex]'\{').Replace($Text, $New, 1)
+                    $AddedCount += $Ids.Count
+                }
+            }
+
+            if ($Text -ne $Original) {
+                $null = $Text | ConvertFrom-Json -ErrorAction Stop
+                [IO.File]::WriteAllText($SpecialFile, $Text, (New-Object Text.UTF8Encoding($false)))
+                Write-Host "Installed: $DataFile ($AddedCount card IDs added)"
+            }
+            else {
+                Write-Host "$DataFile is already up to date."
+            }
+        }
+        catch {
+            Write-Host "WARNING: Could not update $DataFile, it was left unchanged."
+            Write-Host $_.Exception.Message
+        }
+    }
+}
+
 Write-Host ""
 Write-Host "Cleaning temporary files..."
 
