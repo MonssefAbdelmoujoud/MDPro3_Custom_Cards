@@ -6,36 +6,51 @@ $ProgressPreference = 'SilentlyContinue'
 
 $RepoZipUrl = "https://github.com/MonssefAbdelmoujoud/MDPro3_Custom_Cards/archive/refs/heads/main.zip"
 
-$TempDir = Join-Path $env:TEMP "MDPro3_Custom_Cards_Update"
+$TempDir = Join-Path $env:TEMP "MDPro_Custom_Cards_Update"
 $ZipPath = Join-Path $TempDir "pack.zip"
 $ExtractPath = Join-Path $TempDir "extracted"
 
 Write-Host "====================================="
-Write-Host " MDPro3 Custom Cards Installer"
+Write-Host " MDPro Custom Cards Installer"
 Write-Host "====================================="
 Write-Host ""
 
-Write-Host "Using MDPro3 folder:"
+Write-Host "Using MDPro folder:"
 Write-Host $MDProPath
 Write-Host ""
 
 if (!(Test-Path $MDProPath)) {
-    Write-Host "ERROR: The MDPro3 folder does not exist:"
+    Write-Host "ERROR: The MDPro folder does not exist:"
     Write-Host $MDProPath
     exit 1
 }
 
-if (!(Test-Path (Join-Path $MDProPath "Expansions"))) {
-    Write-Host "ERROR: This does not look like a valid MDPro3 folder."
-    Write-Host "Missing folder:"
-    Write-Host (Join-Path $MDProPath "Expansions")
+foreach ($Required in @("Expansions", "Picture")) {
+    if (!(Test-Path (Join-Path $MDProPath $Required))) {
+        Write-Host "ERROR: This does not look like a valid MDPro folder."
+        Write-Host "Missing folder:"
+        Write-Host (Join-Path $MDProPath $Required)
+        exit 1
+    }
+}
+
+# The repo stores game data files under MDPro3_Data; MDPro4 keeps the same files under MDPro4_Data.
+$DataFolder = Get-ChildItem $MDProPath -Directory -Filter "MDPro*_Data" | Sort-Object Name -Descending | Select-Object -First 1
+
+if ($null -eq $DataFolder) {
+    Write-Host "ERROR: No MDPro3_Data or MDPro4_Data folder was found in:"
+    Write-Host $MDProPath
     exit 1
 }
 
-if (!(Test-Path (Join-Path $MDProPath "Picture"))) {
-    Write-Host "ERROR: This does not look like a valid MDPro3 folder."
-    Write-Host "Missing folder:"
-    Write-Host (Join-Path $MDProPath "Picture")
+$DataFolderName = $DataFolder.Name
+$IsMDPro3 = $DataFolderName -eq "MDPro3_Data"
+Write-Host "Detected game data folder: $DataFolderName"
+Write-Host ""
+
+$GameName = $DataFolderName -replace '_Data$', ''
+if (Get-Process -Name $GameName -ErrorAction SilentlyContinue) {
+    Write-Host "ERROR: $GameName is running. Close the game and run the installer again."
     exit 1
 }
 
@@ -90,11 +105,65 @@ if ($FilesToInstall.Count -eq 0) {
     exit 1
 }
 
+$InstallList = foreach ($File in $FilesToInstall) {
+    $RelativePath = $File.FullName.Substring($SourceRoot.Length).TrimStart('\', '/') -replace '/', '\'
+    # Cut-in bundles (MDPro3_Data\StandaloneWindows64\MonsterCutin2) go to this game's own data folder
+    $RelativePath = $RelativePath -replace '^MDPro\d+_Data(?=\\)', $DataFolderName
+    [pscustomobject]@{ Source = $File.FullName; RelativePath = $RelativePath }
+}
+
+$PlannedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+$InstallList | ForEach-Object { [void]$PlannedPaths.Add($_.RelativePath) }
+
+# Duplicates are moved to a backup folder instead of being deleted, so nothing is lost.
+$ManifestPath = Join-Path $MDProPath "CustomCards_Installed.txt"
+$BackupRoot = Join-Path $MDProPath ("CustomCards_Backup\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+$MovedCount = 0
+
+function Move-ToBackup([string]$RelativePath, [string]$Reason) {
+    $Source = Join-Path $MDProPath $RelativePath
+    if (!(Test-Path $Source -PathType Leaf)) { return }
+    $Destination = Join-Path $BackupRoot $RelativePath
+    New-Item -ItemType Directory -Path (Split-Path $Destination -Parent) -Force | Out-Null
+    Move-Item $Source $Destination -Force
+    $script:MovedCount++
+    Write-Host "Removed duplicate: $RelativePath ($Reason)"
+}
+
+Write-Host "Checking for duplicate and outdated custom card files..."
+
+# Files a previous run installed that are no longer part of the pack (renamed, moved or deleted in the repo)
+if (Test-Path $ManifestPath) {
+    foreach ($OldPath in [IO.File]::ReadAllLines($ManifestPath)) {
+        if ($OldPath -and !$PlannedPaths.Contains($OldPath)) {
+            Move-ToBackup $OldPath "no longer in the pack"
+        }
+    }
+}
+
+# Older pack layouts put card images, scripts, overframes and cut-ins loose in Expansions\.
+# The pack now installs them elsewhere, so loose copies with the same name are doubles.
+$PlannedElsewhere = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+$InstallList | Where-Object { (Split-Path $_.RelativePath -Parent) -ne "Expansions" } |
+    ForEach-Object { [void]$PlannedElsewhere.Add((Split-Path $_.RelativePath -Leaf)) }
+
+foreach ($Loose in Get-ChildItem (Join-Path $MDProPath "Expansions") -File) {
+    $LoosePath = "Expansions\" + $Loose.Name
+    if (!$PlannedPaths.Contains($LoosePath) -and $PlannedElsewhere.Contains($Loose.Name)) {
+        Move-ToBackup $LoosePath "the pack installs this file in another folder"
+    }
+}
+
+if ($MovedCount -eq 0) {
+    Write-Host "No duplicates found."
+}
+
+Write-Host ""
 Write-Host "Installing custom card files..."
 Write-Host ""
 
-foreach ($File in $FilesToInstall) {
-    $RelativePath = $File.FullName.Substring($SourceRoot.Length).TrimStart('\', '/')
+foreach ($Item in $InstallList) {
+    $RelativePath = $Item.RelativePath
     $TargetFile = Join-Path $MDProPath $RelativePath
     $TargetFolder = Split-Path $TargetFile -Parent
 
@@ -102,18 +171,21 @@ foreach ($File in $FilesToInstall) {
         New-Item -ItemType Directory -Path $TargetFolder -Force | Out-Null
     }
 
-    Copy-Item $File.FullName $TargetFile -Force
+    Copy-Item $Item.Source $TargetFile -Force
     Write-Host "Installed: $RelativePath"
 }
 
-# Finishers and special frames are card ID lists in MDPro3's own Data\SpecialCards.json
+# Remember what was installed so the next update can remove files the pack no longer has
+[IO.File]::WriteAllLines($ManifestPath, [string[]]@($InstallList | ForEach-Object { $_.RelativePath }))
+
+# Finishers are card ID lists in the game's own Data\SpecialCards.json
 # (Data\Settings.json holds a second copy of the finisher lists).
-# MDPro3 updates rewrite those files, so our card IDs are added to them instead of replacing them.
+# Game updates rewrite those files, so our card IDs are added to them instead of replacing them.
 $SpecialAdditions = Join-Path $RepoFolder.FullName "SpecialCards_Custom.json"
 
 if (Test-Path $SpecialAdditions) {
     Write-Host ""
-    Write-Host "Adding custom cards to MDPro3's special card lists..."
+    Write-Host "Adding custom cards to the game's special card lists..."
 
     foreach ($DataFile in @("Data\SpecialCards.json", "Data\Settings.json")) {
         $SpecialFile = Join-Path $MDProPath $DataFile
@@ -128,6 +200,15 @@ if (Test-Path $SpecialAdditions) {
 
             foreach ($Prop in $Additions.PSObject.Properties) {
                 $Key = $Prop.Name
+
+                # MDPro4 retired the Frame* lists; frames are chosen in the Card appearance menu instead
+                if (!$IsMDPro3 -and $Key -like "Frame*") {
+                    if ($DataFile -eq "Data\SpecialCards.json") {
+                        Write-Host "Skipped: $Key (frame lists are not used by $GameName, pick the frame in Card appearance)"
+                    }
+                    continue
+                }
+
                 $Ids = @($Prop.Value | ForEach-Object { [int]$_ })
                 $Match = [regex]::Match($Text, '"' + [regex]::Escape($Key) + '"\s*:\s*\[([^\]]*)\]')
 
@@ -176,4 +257,10 @@ Write-Host "====================================="
 Write-Host " Installation complete!"
 Write-Host "====================================="
 Write-Host ""
-Write-Host "You can now start MDPro3."
+if ($MovedCount -gt 0) {
+    Write-Host "$MovedCount duplicate file(s) were moved to:"
+    Write-Host $BackupRoot
+    Write-Host "You can delete that folder once the game works."
+    Write-Host ""
+}
+Write-Host "You can now start $GameName."

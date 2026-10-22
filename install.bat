@@ -1,12 +1,12 @@
 @echo off
-title MDPro3 Custom Cards Installer
+title MDPro Custom Cards Installer
 
 echo =====================================
-echo  MDPro3 Custom Cards Installer
+echo  MDPro Custom Cards Installer
 echo =====================================
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*
 
 echo.
 echo =====================================
