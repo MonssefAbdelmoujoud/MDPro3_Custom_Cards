@@ -105,10 +105,18 @@ if ($FilesToInstall.Count -eq 0) {
     exit 1
 }
 
+$OverFrameIds = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+$FilesToInstall | Where-Object { $_.Directory.Name -eq "OverFrame" } | ForEach-Object { [void]$OverFrameIds.Add($_.BaseName) }
+
 $InstallList = foreach ($File in $FilesToInstall) {
     $RelativePath = $File.FullName.Substring($SourceRoot.Length).TrimStart('\', '/') -replace '/', '\'
     # Cut-in bundles (MDPro3_Data\StandaloneWindows64\MonsterCutin2) go to this game's own data folder
     $RelativePath = $RelativePath -replace '^MDPro\d+_Data(?=\\)', $DataFolderName
+    # MDPro4 only reads .png from Picture\Art2 and takes .jpg artwork from Picture\Art.
+    # Cards with an overframe image keep using that, so only the others are moved.
+    if (!$IsMDPro3 -and $RelativePath -match '^Picture\\Art2\\[^\\]+\.jpe?g$' -and !$OverFrameIds.Contains($File.BaseName)) {
+        $RelativePath = "Picture\Art\" + $File.Name
+    }
     [pscustomobject]@{ Source = $File.FullName; RelativePath = $RelativePath }
 }
 
